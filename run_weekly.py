@@ -2,7 +2,6 @@
 
 import pandas as pd
 import datetime as dt
-import re
 import time
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -16,7 +15,58 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 ##########FUNCTIONS##########
 
-def calculate_predictions():
+# Function to convert odds to probability
+def _calculate_odds(odds):
+    if odds<0:
+        return (abs(odds)/(abs(odds)+100))*100
+    if odds>0:
+        return (100/(odds+100))*100
+
+def _calculate_kc(row, kelly, Home):
+    if Home:
+        diff = row.Home_Prob_538 - row.Home_Prob_Odds
+        if diff<0:
+            return 0
+        else:
+            p = row.Home_Prob_538
+            q = 1-p
+            ml = row.Home_Odds
+            if ml>=0:
+                b = (ml/100)
+            if ml<0:
+                b = (100/abs(ml))
+            kc = ((p*b) - q) / b
+            if (kc > 0.5) & (kc<0.6):
+                return kc/(kelly+2)
+            if (kc > 0.6) & (kc<0.7):
+                return kc/(kelly+4)
+            if kc > 0.7:
+                return kc/(kelly+7)
+            else:
+                return kc/kelly
+    if not Home:
+        diff = row.Away_Prob_538 - row.Away_Prob_Odds
+        if diff<0:
+            return 0
+        else:
+            p = row.Away_Prob_538
+            q = 1-p
+            ml = row.Away_Odds
+            if ml>=0:
+                b = (ml/100)
+            if ml<0:
+                b = (100/abs(ml))
+            kc = ((p*b) - q) / b
+            if (kc > 0.5) & (kc<0.6):
+                return kc/(kelly+2)
+            if (kc > 0.6) & (kc<0.7):
+                return kc/(kelly+4)
+            if kc > 0.7:
+                return kc/(kelly+7)
+            else:
+                return kc/kelly
+
+def calculate_predictions(capital):
     
     # Getting 538 data
 
@@ -57,12 +107,6 @@ def calculate_predictions():
     teams = list(df.team_1.unique())
     teams.extend(list(df.team_2.unique()))
     teams = list(set(teams))
-    # Function to convert odds to probability
-    def _calculate_odds(odds):
-        if odds<0:
-            return (abs(odds)/(abs(odds)+100))*100
-        if odds>0:
-            return (100/(odds+100))*100
     # Iterating through to get home/away and odds
     odds_df = pd.DataFrame(columns = ['Home_Team', 'Away_Team', 'Home_Odds', 'Away_Odds'])
     for index, row in odds.iterrows():
@@ -114,7 +158,27 @@ def calculate_predictions():
 
     # Joining odds to 538 projections and generating bets
 
-    final_df = df.merge(odds_df, )
+    final_df = df.merge(odds_df, left_on = 'team_2', right_on = 'Home_Team')
+    final_df = final_df[['Home_Team', 'Away_Team', 'Home_Odds', 'Away_Odds', 'Home_Prob', 'Away_Prob', 
+                        'team_2_prob', 'team_1_prob']]
+    final_df.columns = ['Home_Team', 'Away_Team', 'Home_Odds', 'Away_Odds', 'Home_Prob_Odds', 'Away_Prob_Odds', 
+                        'Home_Prob_538', 'Away_Prob_538']
+    # Formatting columns for KC
+    final_df['Home_Prob_538'] = final_df.Home_Prob_538.str.strip('%')
+    final_df['Away_Prob_538'] = final_df.Away_Prob_538.str.strip('%')
+    final_df['Home_Prob_538'] = final_df.Home_Prob_538.astype('float') / 100.0
+    final_df['Away_Prob_538'] = final_df.Away_Prob_538.astype('float') / 100.0
+    final_df['Home_Prob_Odds'] = final_df.Home_Prob_Odds / 100.0
+    final_df['Away_Prob_Odds'] = final_df.Away_Prob_Odds / 100.0
+    # Creating bets
+    final_df['Home_KC'] = final_df.apply(_calculate_kc, axis = 1, kelly = 10, Home = True)
+    final_df['Away_KC'] = final_df.apply(_calculate_kc, axis = 1, kelly = 10, Home = False)
+    final_df['Bet'] = final_df.apply(lambda x: capital * x.Home_KC if x.Home_KC>0
+            else capital * x.Away_KC, axis = 1)
+
+    # Saving
+
+    final_df.to_csv(f'Bets_{dt.date.today()}')
 
     return
 
