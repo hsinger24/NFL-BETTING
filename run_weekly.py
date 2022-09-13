@@ -3,6 +3,8 @@
 import pandas as pd
 import datetime as dt
 import time
+import os
+import re
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
@@ -16,6 +18,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 ##########FUNCTIONS##########
 
 # Function to convert odds to probability
+
 def _calculate_odds(odds):
     if odds<0:
         return (abs(odds)/(abs(odds)+100))*100
@@ -65,6 +68,22 @@ def _calculate_kc(row, kelly, Home):
                 return kc/(kelly+7)
             else:
                 return kc/kelly
+
+def _calculate_payoff(row):
+    if row.Bet<=0:
+        payoff = 0
+    else:
+        if row.Home_KC>0:
+            if row.Home_Odds>0:
+                payoff = (row.Home_Odds/100)*row.Bet
+            if row.Home_Odds<0:
+                payoff = row.Bet/((abs(row.Home_Odds)/100))
+        if row.Away_KC>0:
+            if row.Away_Odds>0:
+                payoff = (row.Away_Odds/100)*row.Bet
+            if row.Away_Odds<0:
+                payoff = row.Bet/((abs(row.Away_Odds)/100))
+    return payoff
 
 def calculate_predictions(capital):
     
@@ -178,8 +197,80 @@ def calculate_predictions(capital):
 
     # Saving
 
-    final_df.to_csv(f'Bets_{dt.date.today()}')
+    final_df.to_csv(f'Bets/Bets_{dt.date.today()}.csv')
 
     return
 
-def calculate_results():
+def calculate_results(week, capital):
+
+    # Getting winners
+
+    #Instantiating stuff used throughout
+    winners = []
+    team_regex = r'\D+'
+    #Iterating through tables and finding winners
+    tables = pd.read_html(f'https://www.cbssports.com/nfl/scoreboard/all/2022/regular/{week}/')
+    for table in tables:
+        if table.columns[0] == tables[0].columns[0]:
+            table['Team'] = table['Unnamed: 0'].apply(lambda x: re.findall(team_regex, x)[0])
+            table = table[['Team', 'T']]
+            table.columns = ['Team', 'Score']
+            table['Score'] = table.Score.astype('float')
+            if table.iloc[0, 1] > table.iloc[1,1]:
+                winners.append(table.iloc[0,0])
+            elif table.iloc[0, 1] == table.iloc[1,1]:
+                pass
+            else:
+                winners.append(table.iloc[1,0])
+    
+    # Determining if bets hit or not
+    files = os.listdir('Bets')
+    lw_bets = pd.read_csv(f'Bets/{files[-1]}', index_col = 0)
+    lw_bets['Payoff'] = lw_bets.apply(_calculate_payoff, axis = 1)
+    lw_bets['Won_Bet'] = lw_bets.apply(lambda x: 1 if (x.Home_KC > 0 and x.Home_Team in winners) or 
+                                    (x.Away_KC > 0 and x.Away_Team in winners) else
+                                    (-1 if ((x.Home_Team not in winners) and (x.Away_Team not in winners)) 
+                                        or x.Bet <= 0 else 0), axis = 1)
+    # Tracking capital
+    lw_bets['Capital_Tracker'] = 0
+    for index, row in lw_bets.iterrows():
+        if index == 0:
+            if row.Won_Bet == 1:
+                lw_bets.loc[index, 'Capital_Tracker'] = capital + row.Payoff
+            if row.Won_Bet == -1:
+                lw_bets.loc[index, 'Capital_Tracker'] = capital
+            if row.Won_Bet == 0:
+                lw_bets.loc[index, 'Capital_Tracker'] = capital - row.Bet
+        else:
+            if row.Won_Bet == 1:
+                lw_bets.loc[index, 'Capital_Tracker'] = lw_bets.loc[(index-1), 'Capital_Tracker'] + row.Payoff
+            if row.Won_Bet == -1:
+                lw_bets.loc[index, 'Capital_Tracker'] = lw_bets.loc[(index-1), 'Capital_Tracker']
+            if row.Won_Bet == 0:
+                lw_bets.loc[index, 'Capital_Tracker'] = lw_bets.loc[(index-1), 'Capital_Tracker'] - row.Bet
+
+    # Saving results
+
+    if week == 1:
+        lw_bets.to_csv('Results.csv')
+    else:
+        results = pd.read_csv('Results.csv', index_col = 0)
+        results = results.append(lw_bets)
+        results.to_csv('Results.csv')
+    
+    return
+
+##########SCRIPT##########
+
+# Getting some inputs for results tracking function
+week = float(input('Sir Hank, what week do we need results from?'))
+if week == 1:
+    capital = 100000
+else:
+    tf_results = pd.read_csv('Results.csv', index_col =  0)
+    capital = float(tf_results.loc[len(tf_results)-1, 'Capital_Tracker'])
+# Results updates and new bets
+calculate_results(week = week, capital = capital)
+tf_results = pd.read_csv('Results.csv', index_col =  0)
+capital = float(tf_results.loc[len(tf_results)-1, 'Capital_Tracker'])
+calculate_predictions(capital = capital)
