@@ -256,6 +256,7 @@ def calculate_results(week, capital):
     else:
         results = pd.read_csv('Results.csv', index_col = 0)
         results = results.append(lw_bets)
+        results.reset_index(drop = True, inplace = True)
         results.to_csv('Results.csv')
     
     return
