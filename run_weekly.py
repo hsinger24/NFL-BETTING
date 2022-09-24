@@ -225,7 +225,18 @@ def calculate_results(week, capital):
     
     # Determining if bets hit or not
     files = os.listdir('Bets')
-    lw_bets = pd.read_csv(f'Bets/{files[-1]}', index_col = 0)
+    date_largest = dt.datetime.strptime('2022-09-01', '%Y-%m-%d')
+    file_name = ''
+    for file in files:
+        if file[5] == '2':
+            date = file[5:15]
+            date = dt.datetime.strptime(date, '%Y-%m-%d')
+            if date > date_largest:
+                date_largest = date
+    for file in files:
+        if file[5:15] == str(date_largest)[:10]:
+            file_name = file
+    lw_bets = pd.read_csv(f'Bets/{file_name}', index_col = 0)
     lw_bets['Payoff'] = lw_bets.apply(_calculate_payoff, axis = 1)
     lw_bets['Won_Bet'] = lw_bets.apply(lambda x: 1 if (x.Home_KC > 0 and x.Home_Team in winners) or 
                                     (x.Away_KC > 0 and x.Away_Team in winners) else
@@ -264,7 +275,7 @@ def calculate_results(week, capital):
 ##########SCRIPT##########
 
 # Getting some inputs for results tracking function
-week = float(input('Sir Hank, what week do we need results from?'))
+week = input('Sir Hank, what week do we need results from?')
 if week == 1:
     capital = 100000
 else:
